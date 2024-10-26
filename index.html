@@ -1,12 +1,74 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+  <head>
+	<link rel="icon" href="images/romero.ico" type="image/x-icon">
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Placeholder</title>
-</head>
-<body>
-    <h1>x0.gg</h1>
-    <img src="images/ROMERO.png" alt="ROMERO">
-</body>
+    <title>x0</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #b04454;
+        overflow: hidden;
+      }
+      .banner {
+        background-color: #092cd2;
+        height: 120px;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        padding: 10px;
+      }
+      .logo {
+        height: 100px;
+        filter: invert(37%) sepia(22%) saturate(1628%) hue-rotate(303deg) brightness(88%) contrast(91%);
+        pointer-events: none;
+        user-select: none;
+      }
+      .bouncing-gif {
+        position: absolute;
+        width: 250px;
+        height: 250px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="banner">
+      <img src="images/x0.svg" class="logo" alt="x0 Logo">
+    </div>
+    <div style="height: 90vh;"></div>
+    <img src="images/under-construction.gif" class="bouncing-gif" alt="Under Construction">
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        const gif = document.querySelector('.bouncing-gif');
+        let x = 150, y = 150;
+        let dx = 2, dy = 1;
+
+        function moveGif() {
+          const bodyWidth = document.body.clientWidth;
+          const bodyHeight = document.body.clientHeight;
+          const maxY = bodyHeight - gif.height;
+          const minY = document.querySelector('.banner').offsetHeight;
+          
+          x += dx;
+          y += dy;
+
+          if (x + gif.width > bodyWidth || x < 0) {
+            dx = -dx;
+          }
+          if (y > maxY || y < minY) {
+            dy = -dy;
+          }
+
+          gif.style.left = x + 'px';
+          gif.style.top = y + 'px';
+
+          requestAnimationFrame(moveGif);
+        }
+
+        moveGif();
+      });
+    </script>
+  </body>
 </html>
