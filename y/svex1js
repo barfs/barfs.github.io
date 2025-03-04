@@ -1,0 +1,381 @@
+<script>
+  // Reactivity and state management
+  import { onMount, onDestroy, tick, createEventDispatcher } from 'svelte';
+  import { writable, derived } from 'svelte/store';
+  
+  // Component props with default values
+  export let title = "Svelte Features Demo";
+  export let initialCount = 0;
+  
+  // Local component state
+  let count = initialCount;
+  let name = "Svelte";
+  let todos = [
+    { id: 1, text: 'Learn Svelte basics', done: true },
+    { id: 2, text: 'Build a component', done: true },
+    { id: 3, text: 'Master reactivity', done: false }
+  ];
+  let newTodo = "";
+  let showCompleted = true;
+  let timeoutId;
+  let mounted = false;
+  let colors = ["red", "green", "blue"];
+  let selectedColor = "blue";
+  
+  // Reactive declarations - automatically updated when dependencies change
+  $: doubledCount = count * 2;
+  $: greeting = `Hello ${name}!`;
+  $: remaining = todos.filter(todo => !todo.done).length;
+  $: {
+    // This block runs whenever count changes
+    console.log(`Count changed to ${count}`);
+    document.title = `Count: ${count}`;
+  }
+  
+  // Stores for global state management
+  const timeStore = writable(new Date());
+  const formattedTime = derived(timeStore, $time => $time.toLocaleTimeString());
+  
+  // Event dispatcher for custom events
+  const dispatch = createEventDispatcher();
+  
+  // Lifecycle methods
+  onMount(() => {
+    console.log('Component mounted');
+    mounted = true;
+    
+    // Update time every second
+    const interval = setInterval(() => {
+      timeStore.update(() => new Date());
+    }, 1000);
+    
+    return () => {
+      clearInterval(interval);
+    };
+  });
+  
+  onDestroy(() => {
+    console.log('Component destroyed');
+    if (timeoutId) clearTimeout(timeoutId);
+  });
+  
+  // Methods
+  function incrementCount() {
+    count += 1;
+    dispatch('countChanged', { count });
+  }
+  
+  function decrementCount() {
+    count -= 1;
+  }
+  
+  function resetCount() {
+    count = initialCount;
+    // Wait for DOM to update, then focus the input
+    tick().then(() => {
+      document.getElementById('nameInput')?.focus();
+    });
+  }
+  
+  function addTodo() {
+    if (newTodo.trim()) {
+      todos = [...todos, { id: todos.length + 1, text: newTodo, done: false }];
+      newTodo = "";
+    }
+  }
+  
+  function deleteTodo(id) {
+    todos = todos.filter(todo => todo.id !== id);
+  }
+  
+  function toggleTodo(id) {
+    todos = todos.map(todo => 
+      todo.id === id ? { ...todo, done: !todo.done } : todo
+    );
+  }
+  
+  // Custom action (directive)
+  function typewriter(node, { speed = 50 }) {
+    const text = node.textContent;
+    const duration = text.length * speed;
+    
+    return {
+      duration,
+      tick: t => {
+        const i = Math.floor(text.length * t);
+        node.textContent = text.slice(0, i);
+      }
+    };
+  }
+  
+  function handleKeydown(event) {
+    if (event.key === 'Enter') {
+      addTodo();
+    }
+  }
+</script>
+
+<div class="container">
+  <h1>{title}</h1>
+  
+  <!-- Basic reactivity -->
+  <section class="feature-section">
+    <h2>Basic Reactivity</h2>
+    <p>Count: <strong>{count}</strong></p>
+    <p>Doubled: <strong>{doubledCount}</strong></p>
+    <div class="button-group">
+      <button on:click={incrementCount}>Increment</button>
+      <button on:click={decrementCount}>Decrement</button>
+      <button on:click={resetCount}>Reset</button>
+    </div>
+  </section>
+  
+  <!-- Conditional rendering -->
+  <section class="feature-section">
+    <h2>Conditional Rendering</h2>
+    {#if count > 5}
+      <p class="success">Count is greater than 5!</p>
+    {:else if count < 0}
+      <p class="error">Count is negative!</p>
+    {:else}
+      <p>Count is between 0 and 5.</p>
+    {/if}
+  </section>
+  
+  <!-- Two-way binding -->
+  <section class="feature-section">
+    <h2>Two-way Binding</h2>
+    <label>
+      Name:
+      <input id="nameInput" type="text" bind:value={name}>
+    </label>
+    <p use:typewriter={{ speed: 100 }}>{greeting}</p>
+  </section>
+  
+  <!-- Loops and keyed each blocks -->
+  <section class="feature-section">
+    <h2>Todo List (Loops & Each Blocks)</h2>
+    <div class="todo-input">
+      <input 
+        type="text" 
+        bind:value={newTodo} 
+        placeholder="Add a new todo" 
+        on:keydown={handleKeydown}
+      >
+      <button on:click={addTodo}>Add</button>
+    </div>
+    
+    <label>
+      <input type="checkbox" bind:checked={showCompleted}>
+      Show completed tasks
+    </label>
+    
+    <ul class="todo-list">
+      {#each todos.filter(todo => showCompleted || !todo.done) as todo (todo.id)}
+        <li class:completed={todo.done}>
+          <input type="checkbox" bind:checked={todo.done}>
+          <span>{todo.text}</span>
+          <button class="delete-btn" on:click={() => deleteTodo(todo.id)}>×</button>
+        </li>
+      {:else}
+        <li>No todos to display!</li>
+      {/each}
+    </ul>
+    
+    <p>
+      {remaining} of {todos.length} items remaining
+    </p>
+  </section>
+  
+  <!-- Component lifecycle -->
+  <section class="feature-section">
+    <h2>Component Lifecycle</h2>
+    <p>Component mounted: {mounted ? 'Yes' : 'No'}</p>
+    <p>Current time: {$formattedTime}</p>
+  </section>
+  
+  <!-- Event handling -->
+  <section class="feature-section">
+    <h2>Event Handling & Modifiers</h2>
+    <button on:click|once={() => alert('This alert shows only once')}>
+      Click me once
+    </button>
+
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div 
+      class="event-box"
+      on:mouseenter={() => selectedColor = colors[Math.floor(Math.random() * colors.length)]}
+      style="background-color: {selectedColor};"
+    >
+      Hover over me (changes color randomly)
+    </div>
+  </section>
+  
+  <!-- Slots for content projection -->
+  <section class="feature-section">
+    <h2>Slots (Demo)</h2>
+    <div class="card">
+      <div class="card-header">
+        <slot name="header">Default Header Content</slot>
+      </div>
+      <div class="card-body">
+        <slot>
+          <p>This is fallback content for the default slot</p>
+        </slot>
+      </div>
+      <div class="card-footer">
+        <slot name="footer">Default Footer Content</slot>
+      </div>
+    </div>
+  </section>
+  
+  <!-- Forwarded events example -->
+  <section class="feature-section">
+    <h2>Event Forwarding</h2>
+    <p>The increment button dispatches a custom 'countChanged' event.</p>
+  </section>
+</div>
+
+<style>
+  /* Global styles */
+  :global(body) {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen,
+      Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+    line-height: 1.6;
+    color: #333;
+    margin: 0;
+    padding: 20px;
+    background-color: #f9f9f9;
+  }
+  
+  .container {
+    max-width: 800px;
+    margin: 0 auto;
+    background: #fff;
+    padding: 20px;
+    border-radius: 8px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+  }
+  
+  h1 {
+    color: #ff3e00; /* Svelte orange */
+    text-align: center;
+    margin-bottom: 30px;
+  }
+  
+  .feature-section {
+    margin-bottom: 30px;
+    padding: 20px;
+    border: 1px solid #eee;
+    border-radius: 4px;
+  }
+  
+  h2 {
+    color: #ff3e00;
+    font-size: 1.4rem;
+    margin-top: 0;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 10px;
+  }
+  
+  button {
+    background-color: #ff3e00;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 1rem;
+    margin-right: 5px;
+    transition: background-color 0.3s;
+  }
+  
+  button:hover {
+    background-color: #dd3700;
+  }
+  
+  .button-group {
+    display: flex;
+    gap: 10px;
+    margin: 10px 0;
+  }
+  
+  input[type="text"] {
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 1rem;
+    width: 250px;
+  }
+  
+  .success {
+    color: green;
+    font-weight: bold;
+  }
+  
+  .error {
+    color: red;
+    font-weight: bold;
+  }
+  
+  /* Todo list styles */
+  .todo-input {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  
+  .todo-list {
+    list-style-type: none;
+    padding: 0;
+  }
+  
+  .todo-list li {
+    display: flex;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid #eee;
+  }
+  
+  .completed span {
+    text-decoration: line-through;
+    color: #999;
+  }
+  
+  .delete-btn {
+    background: none;
+    color: #ff3e00;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    margin-left: auto;
+    padding: 0 8px;
+  }
+  
+  /* Event box */
+  .event-box {
+    padding: 20px;
+    text-align: center;
+    color: white;
+    border-radius: 4px;
+    margin-top: 10px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+  }
+  
+  /* Card component for slots demo */
+  .card {
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  
+  .card-header, .card-footer {
+    background-color: #f8f8f8;
+    padding: 10px 15px;
+  }
+  
+  .card-body {
+    padding: 15px;
+  }
+</style>
