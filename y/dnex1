@@ -1,0 +1,580 @@
+/*
+{
+  "ConnectionStrings": {
+    "DefaultConnection": "Server=(localdb)\\mssqllocaldb;Database=DemoDb;Trusted_Connection=True;"
+  },
+  "Jwt": {
+    "Key": "YourSecureSecretKeyHere",
+    "Issuer": "YourApiDomain",
+    "Audience": "YourAppDomain"
+  }
+}
+*/
+
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
+using System;
+using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
+using System.IdentityModel.Tokens.Jwt;
+using System.Linq;
+using System.Security.Claims;
+using System.Text;
+using System.Threading.Tasks;
+
+var builder = WebApplication.CreateBuilder(args);
+
+// Add services to the container
+ConfigureServices(builder.Services, builder.Configuration);
+
+var app = builder.Build();
+
+// Configure the HTTP request pipeline
+ConfigureMiddleware(app, app.Environment);
+
+// Apply database migrations
+ApplyMigrations(app);
+
+// Start the application
+app.Run();
+
+// Service configuration
+void ConfigureServices(IServiceCollection services, IConfiguration configuration)
+{
+    // Add DbContext using SQL Server
+    services.AddDbContext<ApplicationDbContext>(options =>
+        options.UseSqlServer(configuration.GetConnectionString("DefaultConnection")));
+
+    // Add controllers
+    services.AddControllers();
+
+    // Add Swagger/OpenAPI documentation
+    services.AddEndpointsApiExplorer();
+    services.AddSwaggerGen(c =>
+    {
+        c.SwaggerDoc("v1", new OpenApiInfo { Title = "Demo API", Version = "v1" });
+        
+        // Configure Swagger to use JWT Authentication
+        c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+        {
+            Description = "JWT Authorization header using the Bearer scheme",
+            Name = "Authorization",
+            In = ParameterLocation.Header,
+            Type = SecuritySchemeType.ApiKey,
+            Scheme = "Bearer"
+        });
+
+        c.AddSecurityRequirement(new OpenApiSecurityRequirement
+        {
+            {
+                new OpenApiSecurityScheme
+                {
+                    Reference = new OpenApiReference
+                    {
+                        Type = ReferenceType.SecurityScheme,
+                        Id = "Bearer"
+                    }
+                },
+                Array.Empty<string>()
+            }
+        });
+    });
+
+    // Add CORS support
+    services.AddCors(options =>
+    {
+        options.AddPolicy("CorsPolicy", builder =>
+            builder.AllowAnyOrigin()
+                   .AllowAnyMethod()
+                   .AllowAnyHeader());
+    });
+
+    // Configure JWT Authentication
+    services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+        .AddJwtBearer(options =>
+        {
+            options.TokenValidationParameters = new TokenValidationParameters
+            {
+                ValidateIssuer = true,
+                ValidateAudience = true,
+                ValidateLifetime = true,
+                ValidateIssuerSigningKey = true,
+                ValidIssuer = configuration["Jwt:Issuer"],
+                ValidAudience = configuration["Jwt:Audience"],
+                IssuerSigningKey = new SymmetricSecurityKey(
+                    Encoding.UTF8.GetBytes(configuration["Jwt:Key"] ?? "YourSuperLongSecretKeyForDemoOnly12345"))
+            };
+        });
+
+    // Add authorization policies
+    services.AddAuthorization(options =>
+    {
+        options.AddPolicy("AdminOnly", policy => policy.RequireRole("Admin"));
+        options.AddPolicy("UserAccess", policy => policy.RequireRole("User", "Admin"));
+    });
+    
+    // Register Services
+    services.AddScoped<IProductService, ProductService>();
+}
+
+// Configure middleware
+void ConfigureMiddleware(IApplicationBuilder app, IHostEnvironment env)
+{
+    // Development-specific middleware
+    if (env.IsDevelopment())
+    {
+        app.UseDeveloperExceptionPage();
+        app.UseSwagger();
+        app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Demo API v1"));
+    }
+    else
+    {
+        // Production middleware
+        app.UseExceptionHandler("/api/error");
+        app.UseHsts();
+    }
+
+    // Common middleware
+    app.UseHttpsRedirection();
+    app.UseRouting();
+    app.UseCors("CorsPolicy");
+    
+    // Authentication & Authorization
+    app.UseAuthentication();
+    app.UseAuthorization();
+    
+    // Map controllers
+    app.UseEndpoints(endpoints =>
+    {
+        endpoints.MapControllers();
+        
+        // Health check endpoint
+        endpoints.MapGet("/health", () => "Healthy");
+        
+        // Minimal API endpoints
+        endpoints.MapGet("/api/info", () => new { Name = "Demo API", Version = "1.0" });
+    });
+}
+
+// Apply database migrations
+void ApplyMigrations(IApplicationBuilder app)
+{
+    using var scope = app.ApplicationServices.CreateScope();
+    var context = scope.ServiceProvider.GetService<ApplicationDbContext>();
+    context?.Database.Migrate();
+}
+
+// DbContext
+public class ApplicationDbContext : DbContext
+{
+    public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+        : base(options)
+    {
+    }
+
+    public DbSet<Product> Products { get; set; }
+    public DbSet<User> Users { get; set; }
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        // Seed initial data
+        modelBuilder.Entity<Product>().HasData(
+            new Product { Id = 1, Name = "Product 1", Price = 19.99m, Stock = 100 },
+            new Product { Id = 2, Name = "Product 2", Price = 29.99m, Stock = 50 }
+        );
+
+        // Example of configuring relationships
+        modelBuilder.Entity<Order>()
+            .HasOne(o => o.User)
+            .WithMany(u => u.Orders)
+            .HasForeignKey(o => o.UserId);
+    }
+}
+
+// Models
+public class Product
+{
+    public int Id { get; set; }
+    
+    [Required]
+    [StringLength(100)]
+    public string Name { get; set; }
+    
+    [Range(0.01, 1000)]
+    public decimal Price { get; set; }
+    
+    public int Stock { get; set; }
+}
+
+public class User
+{
+    public int Id { get; set; }
+    
+    [Required]
+    [StringLength(50)]
+    public string Username { get; set; }
+    
+    [Required]
+    public string PasswordHash { get; set; }
+    
+    public string Email { get; set; }
+    
+    public string Role { get; set; }
+    
+    public ICollection<Order> Orders { get; set; }
+}
+
+public class Order
+{
+    public int Id { get; set; }
+    public DateTime OrderDate { get; set; }
+    public int UserId { get; set; }
+    public User User { get; set; }
+    public ICollection<OrderDetail> OrderDetails { get; set; }
+    public decimal TotalAmount { get; set; }
+}
+
+public class OrderDetail
+{
+    public int Id { get; set; }
+    public int OrderId { get; set; }
+    public int ProductId { get; set; }
+    public Product Product { get; set; }
+    public int Quantity { get; set; }
+    public decimal UnitPrice { get; set; }
+}
+
+// DTOs
+public class ProductDto
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public decimal Price { get; set; }
+    public int Stock { get; set; }
+}
+
+public class CreateProductDto
+{
+    [Required]
+    [StringLength(100)]
+    public string Name { get; set; }
+    
+    [Range(0.01, 1000)]
+    public decimal Price { get; set; }
+    
+    public int Stock { get; set; }
+}
+
+public class LoginRequest
+{
+    [Required]
+    public string Username { get; set; }
+    
+    [Required]
+    public string Password { get; set; }
+}
+
+public class LoginResponse
+{
+    public string Token { get; set; }
+    public string Username { get; set; }
+    public string Role { get; set; }
+    public DateTime Expiration { get; set; }
+}
+
+// Service Interfaces
+public interface IProductService
+{
+    Task<IEnumerable<ProductDto>> GetAllProductsAsync();
+    Task<ProductDto> GetProductByIdAsync(int id);
+    Task<ProductDto> CreateProductAsync(CreateProductDto productDto);
+    Task<ProductDto> UpdateProductAsync(int id, CreateProductDto productDto);
+    Task<bool> DeleteProductAsync(int id);
+}
+
+// Service Implementations
+public class ProductService : IProductService
+{
+    private readonly ApplicationDbContext _context;
+    private readonly ILogger<ProductService> _logger;
+
+    public ProductService(ApplicationDbContext context, ILogger<ProductService> logger)
+    {
+        _context = context;
+        _logger = logger;
+    }
+
+    public async Task<IEnumerable<ProductDto>> GetAllProductsAsync()
+    {
+        return await _context.Products
+            .Select(p => new ProductDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                Price = p.Price,
+                Stock = p.Stock
+            })
+            .ToListAsync();
+    }
+
+    public async Task<ProductDto> GetProductByIdAsync(int id)
+    {
+        var product = await _context.Products.FindAsync(id);
+        
+        if (product == null)
+        {
+            _logger.LogWarning("Product with ID {ProductId} not found", id);
+            return null;
+        }
+
+        return new ProductDto
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Price = product.Price,
+            Stock = product.Stock
+        };
+    }
+
+    public async Task<ProductDto> CreateProductAsync(CreateProductDto productDto)
+    {
+        var product = new Product
+        {
+            Name = productDto.Name,
+            Price = productDto.Price,
+            Stock = productDto.Stock
+        };
+
+        _context.Products.Add(product);
+        await _context.SaveChangesAsync();
+        
+        _logger.LogInformation("Product created: {ProductId}", product.Id);
+
+        return new ProductDto
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Price = product.Price,
+            Stock = product.Stock
+        };
+    }
+
+    public async Task<ProductDto> UpdateProductAsync(int id, CreateProductDto productDto)
+    {
+        var product = await _context.Products.FindAsync(id);
+
+        if (product == null)
+        {
+            _logger.LogWarning("Attempt to update non-existent product with ID {ProductId}", id);
+            return null;
+        }
+
+        product.Name = productDto.Name;
+        product.Price = productDto.Price;
+        product.Stock = productDto.Stock;
+
+        await _context.SaveChangesAsync();
+        
+        _logger.LogInformation("Product updated: {ProductId}", id);
+
+        return new ProductDto
+        {
+            Id = product.Id,
+            Name = product.Name,
+            Price = product.Price,
+            Stock = product.Stock
+        };
+    }
+
+    public async Task<bool> DeleteProductAsync(int id)
+    {
+        var product = await _context.Products.FindAsync(id);
+
+        if (product == null)
+        {
+            _logger.LogWarning("Attempt to delete non-existent product with ID {ProductId}", id);
+            return false;
+        }
+
+        _context.Products.Remove(product);
+        await _context.SaveChangesAsync();
+        
+        _logger.LogInformation("Product deleted: {ProductId}", id);
+        
+        return true;
+    }
+}
+
+// Controllers
+[ApiController]
+[Route("api/products")]
+public class ProductsController : ControllerBase
+{
+    private readonly IProductService _productService;
+    private readonly ILogger<ProductsController> _logger;
+
+    public ProductsController(IProductService productService, ILogger<ProductsController> logger)
+    {
+        _productService = productService;
+        _logger = logger;
+    }
+
+    [HttpGet]
+    public async Task<ActionResult<IEnumerable<ProductDto>>> GetProducts()
+    {
+        var products = await _productService.GetAllProductsAsync();
+        return Ok(products);
+    }
+
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ProductDto>> GetProduct(int id)
+    {
+        var product = await _productService.GetProductByIdAsync(id);
+
+        if (product == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(product);
+    }
+
+    [HttpPost]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<ActionResult<ProductDto>> CreateProduct(CreateProductDto productDto)
+    {
+        var createdProduct = await _productService.CreateProductAsync(productDto);
+        return CreatedAtAction(nameof(GetProduct), new { id = createdProduct.Id }, createdProduct);
+    }
+
+    [HttpPut("{id}")]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> UpdateProduct(int id, CreateProductDto productDto)
+    {
+        var updatedProduct = await _productService.UpdateProductAsync(id, productDto);
+
+        if (updatedProduct == null)
+        {
+            return NotFound();
+        }
+
+        return Ok(updatedProduct);
+    }
+
+    [HttpDelete("{id}")]
+    [Authorize(Policy = "AdminOnly")]
+    public async Task<IActionResult> DeleteProduct(int id)
+    {
+        var result = await _productService.DeleteProductAsync(id);
+
+        if (!result)
+        {
+            return NotFound();
+        }
+
+        return NoContent();
+    }
+}
+
+[ApiController]
+[Route("api/auth")]
+public class AuthController : ControllerBase
+{
+    private readonly ApplicationDbContext _context;
+    private readonly IConfiguration _configuration;
+    private readonly ILogger<AuthController> _logger;
+
+    public AuthController(
+        ApplicationDbContext context, 
+        IConfiguration configuration,
+        ILogger<AuthController> logger)
+    {
+        _context = context;
+        _configuration = configuration;
+        _logger = logger;
+    }
+
+    [HttpPost("login")]
+    public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
+    {
+        // Note: In a real application, you should validate credentials properly
+        // This is simplified for demonstration purposes
+        var user = await _context.Users
+            .FirstOrDefaultAsync(u => u.Username == request.Username);
+
+        if (user == null || !VerifyPassword(request.Password, user.PasswordHash))
+        {
+            _logger.LogWarning("Failed login attempt for user: {Username}", request.Username);
+            return Unauthorized(new { Message = "Invalid username or password" });
+        }
+
+        var token = GenerateJwtToken(user);
+        
+        _logger.LogInformation("User logged in: {Username}", user.Username);
+
+        return Ok(new LoginResponse
+        {
+            Token = token,
+            Username = user.Username,
+            Role = user.Role,
+            Expiration = DateTime.UtcNow.AddHours(1)
+        });
+    }
+
+    private string GenerateJwtToken(User user)
+    {
+        var securityKey = new SymmetricSecurityKey(
+            Encoding.UTF8.GetBytes(_configuration["Jwt:Key"] ?? "YourSuperLongSecretKeyForDemoOnly12345"));
+        var credentials = new SigningCredentials(securityKey, SecurityAlgorithms.HmacSha256);
+
+        var claims = new[]
+        {
+            new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Email, user.Email),
+            new Claim(ClaimTypes.Name, user.Username),
+            new Claim(ClaimTypes.Role, user.Role),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
+        };
+
+        var token = new JwtSecurityToken(
+            issuer: _configuration["Jwt:Issuer"],
+            audience: _configuration["Jwt:Audience"],
+            claims: claims,
+            expires: DateTime.UtcNow.AddHours(1),
+            signingCredentials: credentials
+        );
+
+        return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private bool VerifyPassword(string password, string passwordHash)
+    {
+        // Note: In a real application, use a proper password hashing library
+        // This is simplified for demonstration purposes
+        return passwordHash == password; // DO NOT USE THIS IN PRODUCTION
+    }
+}
+
+// Error handling middleware
+[ApiController]
+[Route("api/error")]
+public class ErrorController : ControllerBase
+{
+    [HttpGet]
+    public IActionResult Error()
+    {
+        return Problem(
+            title: "An error occurred while processing your request.",
+            statusCode: StatusCodes.Status500InternalServerError
+        );
+    }
+}
